@@ -1,0 +1,313 @@
+node_modules/
+.expo/
+dist/
+web-build/
+.env
+.env.local
+*.log
+.DS_Store
+.idea/
+.vscode/
+ios/
+android/
+build/
+coverage/
+
+README.md
++65 -1
+# fluentirl
+# Fluent IRL
+
+Practice real-life English conversations with an AI partner. Focus on social
+fluency, not grammar drills.
+
+## Stack
+
+- **Mobile**: React Native (Expo, TypeScript)
+- **Backend**: Node.js + Express (TypeScript)
+- **Auth + DB**: Supabase
+- **AI**: Anthropic Claude (`claude-sonnet-4-6`)
+
+## Repo layout
+
+```
+fluentirl/
+├── mobile/        # Expo React Native app
+├── backend/       # Express API (chat, help, feedback)
+└── supabase/      # SQL schema for Supabase
+```
+
+## Quick start
+
+### 1. Supabase
+
+Create a Supabase project, then run `supabase/schema.sql` in the SQL editor.
+Copy the project URL, anon key, and service role key.
+
+### 2. Backend
+
+```bash
+cd backend
+cp .env.example .env   # fill in keys
+npm install
+npm run dev
+```
+
+The API listens on `http://localhost:4000`.
+
+### 3. Mobile
+
+```bash
+cd mobile
+cp .env.example .env   # fill in keys + API URL
+npm install
+npx expo start
+```
+
+## MVP feature list
+
+- Onboarding: goal + English level, stored in Supabase.
+- Home: scenario picker (Party, Coffee shop, Gym) + "Continue last conversation".
+- Chat: WhatsApp-style UI, text + voice input, AI replies in character.
+- Help Me: 3 context-aware reply suggestions.
+- Feedback: naturalness score + plain-language phrasing tips.
+
+## API
+
+| Method | Path                     | Purpose                              |
+|--------|--------------------------|--------------------------------------|
+| POST   | `/api/chat`              | Send a message, get an AI reply      |
+| POST   | `/api/help`              | Get 3 reply suggestions              |
+| POST   | `/api/feedback`          | Score conversation + suggest fixes   |
+
+See `backend/src/routes/` for details.
+
+supabase/
+schema.sql
++86 -0
+-- Fluent IRL — Supabase schema
+-- Run this in the Supabase SQL editor.
+
+-- ---------------------------------------------------------------------------
+-- Users (profile data; auth lives in auth.users)
+-- ---------------------------------------------------------------------------
+create table if not exists public.users (
+  id uuid primary key references auth.users(id) on delete cascade,
+  goal text check (goal in ('make_friends', 'dating', 'confidence')),
+  english_level text check (english_level in ('basic', 'intermediate', 'advanced')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
+-- Conversations
+-- ---------------------------------------------------------------------------
+create table if not exists public.conversations (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  scenario text not null,                 -- 'party' | 'coffee_shop' | 'gym'
+  persona text,                           -- 'friendly' | 'cold' | 'busy' | 'interested'
+  started_at timestamptz not null default now(),
+  ended_at timestamptz,
+  naturalness_score int,                  -- 0-100 after feedback
+  summary text
+);
+
+create index if not exists conversations_user_idx
+  on public.conversations(user_id, started_at desc);
+
+-- ---------------------------------------------------------------------------
+-- Messages
+-- ---------------------------------------------------------------------------
+create table if not exists public.messages (
+  id uuid primary key default gen_random_uuid(),
+  conversation_id uuid not null references public.conversations(id) on delete cascade,
+  role text not null check (role in ('user', 'ai')),
+  content text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists messages_conversation_idx
+  on public.messages(conversation_id, created_at);
+
+-- ---------------------------------------------------------------------------
+-- Progress (one row per user; updated as they finish conversations)
+-- ---------------------------------------------------------------------------
+create table if not exists public.progress (
+  user_id uuid primary key references public.users(id) on delete cascade,
+  conversations_completed int not null default 0,
+  avg_naturalness numeric(5,2) not null default 0,
+  last_active_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------------
+-- Row Level Security
+-- ---------------------------------------------------------------------------
+alter table public.users          enable row level security;
+alter table public.conversations  enable row level security;
+alter table public.messages       enable row level security;
+alter table public.progress       enable row level security;
+
+create policy "users self read"   on public.users
+  for select using (auth.uid() = id);
+create policy "users self write"  on public.users
+  for insert with check (auth.uid() = id);
+create policy "users self update" on public.users
+  for update using (auth.uid() = id);
+
+create policy "conv self read"    on public.conversations
+  for select using (auth.uid() = user_id);
+create policy "conv self write"   on public.conversations
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create policy "msg self read"     on public.messages
+  for select using (
+    auth.uid() = (select user_id from public.conversations c where c.id = conversation_id)
+  );
+create policy "msg self write"    on public.messages
+  for insert with check (
+    auth.uid() = (select user_id from public.conversations c where c.id = conversation_id)
+  );
+
+create policy "progress self"     on public.progress
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+backend/
+package.json
++27 -0
+
+backend/
+tsconfig.json
++16 -0
+
+backend/
+.env.example
++9 -0
+
+backend/src/
+index.ts
++8 -0
+
+backend/src/
+server.ts
++26 -0
+
+backend/src/
+lib/ai.ts
++38 -0
+
+backend/src/lib/
+supabase.ts
++14 -0
+
+backend/src/prompts/
+chat.ts
++71 -0
+
+backend/src/prompts/
+help.ts
++36 -0
+
+backend/src/prompts/
+feedback.ts
++52 -0
+
+backend/src/routes/
+chat.ts
++28 -0
+
+backend/src/routes/
+help.ts
++40 -0
+
+backend/src/routes/
+feedback.ts
++37 -0
+
+mobile/
+app.json
++31 -0
+
+mobile/
+babel.config.js
++6 -0
+
+mobile/
+tsconfig.json
++13 -0
+
+mobile/
+.env.example
++3 -0
+
+mobile/src/theme/
+colors.ts
++40 -0
+
+mobile/src/types/
+index.ts
++32 -0
+
+mobile/src/data/
+scenarios.ts
++29 -0
+
+mobile/src/data/
+mockMessages.ts
++36 -0
+
+mobile/src/
+lib/api.ts
++73 -0
+
+mobile/src/lib/
+supabase.ts
++28 -0
+
+mobile/src/store/
+useAppStore.ts
++55 -0
+
+mobile/
+package.json
++33 -0
+
+mobile/src/navigation/
+RootNavigator.tsx
++54 -0
+
+mobile/
+App.tsx
++13 -0
+
+mobile/src/components/
+PrimaryButton.tsx
++67 -0
+
+mobile/src/components/
+ChatBubble.tsx
++55 -0
+
+mobile/src/components/
+ScenarioCard.tsx
++63 -0
+
+mobile/src/components/
+HelpSuggestions.tsx
++89 -0
+
+mobile/src/screens/
+OnboardingScreen.tsx
++229 -0
+
+mobile/src/screens/
+HomeScreen.tsx
++81 -0
+
+mobile/src/screens/
+ChatScreen.tsx
++333 -0
+
+mobile/src/screens/
+FeedbackScreen.tsx
++204 -0
